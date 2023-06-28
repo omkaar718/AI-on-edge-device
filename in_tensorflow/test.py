@@ -1,7 +1,7 @@
 import tensorflow as tf
 import os
 import numpy as np
-from tqdm import tqdm 
+from tqdm import tqdm
 #from skimage.io import imread
 from PIL import Image
 import argparse
@@ -25,8 +25,9 @@ def main():
     parser.add_argument("--img_channels", default=3, type=int)
     parser.add_argument("--mask_height", default=16, type=int)
     parser.add_argument("--mask_width", default=16, type=int)
-    parser.add_argument("--data_path", 
+    parser.add_argument("--data_path",
                         default='/data/oprabhune/tianen_colab/segmentation_approach/segmentation_dataset/', type=str)
+						
     parser.add_argument("--thresh", default=0.5, type=float)
     parser.add_argument("--model_path", default='saved_during_training', type=str)
     args = parser.parse_args()
@@ -34,8 +35,8 @@ def main():
     #Data Loading
     X_test, Y_test = load_data(
         args.data_path,
-        'test', 
-        (args.img_width, args.img_height, args.img_channels), 
+        'val',
+        (args.img_width, args.img_height, args.img_channels),
         (args.mask_width, args.mask_height)
     )
 
@@ -44,7 +45,9 @@ def main():
     model = tf.keras.models.load_model(args.model_path)
 
     # test
-    test(model, args.thresh, X_test, Y_test)
+    for thresh in range(1, 10, 2):
+        print("\nThreshold : ", thresh*0.1)
+        test(model, thresh*0.1, X_test, Y_test)
 
 if __name__ == "__main__":
     main()
