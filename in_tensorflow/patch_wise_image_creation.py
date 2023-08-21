@@ -3,6 +3,8 @@ import numpy as np
 import cv2
 import os
 import math
+
+
 dir = 'data/val/images/'
 new_model = tf.keras.models.load_model('./smaller_model_saved_during_training_alpha_0.25/')
 
@@ -16,19 +18,22 @@ for img_path in files:
     orig_image_size = orig_img.shape
     #print(orig_image_size)
     image_size = 224 # 512x512
+    
+
     img = cv2.resize(orig_img, (image_size, image_size))
+    
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     img_array = np.expand_dims(img,axis=0).astype(np.float32)
     # Predict
     predictions = tf.squeeze(new_model.predict(img_array))
-
+    resolution_scaling_factor = 0.5
 
     #print(img_2.shape)
     '''
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-    resolution_scaling_factor = 0.3
+
     img_2 = cv2.resize(img, None, fx = resolution_scaling_factor, fy = resolution_scaling_factor)
     img_2 = cv2.resize(img_2, (orig_image_size[1], orig_image_size[0]))
     '''
@@ -38,11 +43,14 @@ for img_path in files:
     #print(grid_w, grid_h)
     
     
-    for threshold in range(0, 110, 10):
-        img_2 = np.zeros(shape = orig_image_size)
+    for threshold in range(50, 100, 20):
+        #img_2 = np.zeros(shape = orig_image_size)
+        img_2 = cv2.resize(orig_img, None, fx = resolution_scaling_factor, fy = resolution_scaling_factor)
+        img_2 = cv2.resize(img_2, (orig_image_size[1], orig_image_size[0]))                                 
+
         threshold = round(0.01*threshold, 1)
         #print(threshold)
-        #threshold = 0.5
+
         roi_indices = np.argwhere(predictions > threshold)
 
         for i in roi_indices:
@@ -50,7 +58,7 @@ for img_path in files:
             col = grid_w*i[1]
             img_2[row: row + grid_h, col: col + grid_w] = orig_img[row: row + grid_h, col: col + grid_w]
         
-        folder = f'data/val/reconstructed_th_{threshold}'
+        folder = f'data/val/sf_{resolution_scaling_factor}_reconstructed_th_{threshold}'
         if not os.path.isdir(folder):
             os.mkdir(folder)
         cv2.imwrite(f'{folder}/{img_path}', img_2)
