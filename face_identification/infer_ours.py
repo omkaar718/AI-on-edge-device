@@ -12,6 +12,7 @@ from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import argparse
 from tqdm import tqdm
+import time
 def resize_with_pad(image, new_shape, padding_color = (0, 0, 0)):
     """Maintains aspect ratio and resizes with padding.
     Params:
@@ -123,12 +124,29 @@ def find_IoU(boxA, boxB):
 	# return the intersection over union value
 	return iou
 
-def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resolution):
-    new_model = tf.keras.models.load_model('face_roi_alpha_0.1_240_15')
-    print('Model loaded')
-    rf_range = np.arange(0, 1.05, 0.2)
-    sf_range = [0.004444444, 0.013333333, 0.035555556, 0.137777778, 0.311111111, 0.551111111, 1]
+def load_tflite_model(tflite_model_path):
+    interpreter_quant = tf.lite.Interpreter(model_path=str(tflite_model_path))
+    interpreter_quant.allocate_tensors()
+    input_index = interpreter_quant.get_input_details()[0]["index"]
+    output_index = interpreter_quant.get_output_details()[0]["index"]
+    return interpreter_quant, input_index, output_index
 
+def main(start_n, end_n, start_identities, end_identities, max_gallery, gallery_folder, full_resolution):
+    #new_model = tf.keras.models.load_model('face_roi_alpha_0.1_240_15')
+
+    interpreter_quant, input_index, output_index = load_tflite_model('dynamic_face_roi_alpha_240_15.tflite')
+
+
+    print('Model loaded')
+    #rf_range = np.arange(0, 1.05, 0.1)
+    rf_range = np.arange(0.05, 1.05, 0.1)
+    if(rf_range[0] == 0):
+        this_rf_range = 'rf_range_1'
+    else:
+        this_rf_range = 'rf_range_2'
+    #sf_range = [0.004444444, 0.013333333, 0.035555556, 0.137777778, 0.311111111, 0.551111111, 1]
+    sf_range = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 25, 29, 33, 40, 65, 110, 140, 190, 225]
+    sf_range = [i/225 for i in sf_range]
     rows, cols = (len(rf_range), len(sf_range))
     results = np.zeros((rows, cols))
     results_in_fraction = np.zeros((rows, cols))
@@ -144,6 +162,7 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
         #start_n = 0
         # displaying the contents of the CSV file
         for n, lines in tqdm(enumerate(csvFile)):
+            print('\n', n, n_identities, start_identities)
             if(n == 0):
                 continue
             
@@ -176,22 +195,28 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
                 check, orig_img = check_image_size(orig_img, hw, getCoordinate(rect))
 
                 if(check):
+                    print('\n', n, n_identities, start_identities)
+
+                    gallery_counter += 1
                     
 
                     if(id != name):
+                        id = name
+                        gallery_counter = 0                         
                         n_identities += 1
-                        if(n_identities > max_identities):
+                        if(n_identities > end_identities):
                             print('\nMax identities reached!!')
                             print(n, probe_counter)
                             break
                         
+
+
                         if(n_identities % 50 == 0):
                             print('n_identities: ', n_identities, name)
                         #print(id, name, image)
-                        id = name
-                        gallery_counter = 0 
-
-                    gallery_counter += 1
+                    if(n_identities < start_identities):
+                        print('\nn_identities < start_identities : ', n_identities, start_identities)
+                        continue
                     
                     if(gallery_counter > max_gallery):
                         
@@ -216,11 +241,14 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
                         
                         img_for_tf_model = np.expand_dims(img_for_tf_model,axis=0).astype(np.float32)
                         # Predict
-                        predictions = tf.squeeze(new_model.predict(img_for_tf_model))
-                        #print(predictions)
-
+                        #predictions = tf.squeeze(new_model.predict(img_for_tf_model))
+                        
+                        interpreter_quant.set_tensor(input_index, img_for_tf_model)
+                        interpreter_quant.invoke()
+                        predictions = tf.squeeze(interpreter_quant.get_tensor(output_index))
+                        
                         for rf_i, resolution_factor in enumerate(rf_range):
-
+                            start_time = time.time()
                             grid_size = predictions.shape[0]
                             grid_w, grid_h = (math.ceil(orig_image_size[1]/grid_size), math.ceil(orig_image_size[0]/grid_size))
                             #print(grid_w, grid_h)
@@ -250,7 +278,7 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
                                     col = grid_w*i[1]
                                     img_2[row: row + grid_h, col: col + grid_w] = orig_img[row: row + grid_h, col: col + grid_w]
                                 
-                                print(img_2.shape)
+                                #print(img_2.shape)
                                 
 
                                 
@@ -313,7 +341,8 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
                                 cv2.imwrite(f'{folder}/{name}_{image}', img_2)
                                 '''
                             
-                            print('\n', n, probe_counter, n_identities)
+                            print(f"\n n : {n} \n n_identities : {n_identities} with start, end of [{start_identities, end_identities}] \n probe_counter : {probe_counter} \n rf {resolution_factor}")
+                            print('Time taken for this ONE rf : ', time.time() - start_time)
                             
             if(save_flag):
                 save_flag = False
@@ -322,10 +351,10 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
                 print('n : ', n)
                 print('probe counter : ', probe_counter)
                 print('results_in_fraction : \n',results_in_fraction)
-                with open(f'ours_results_1080_resolution_max-identities_{max_identities}_in_fraction.npy', 'wb') as f:
+                with open(f'ours_results_resolution_600_id-range_{start_identities}-{end_identities}_this_rf_range_{this_rf_range}_in_fraction.npy', 'wb') as f:
                     np.save(f, results_in_fraction)
 
-                with open(f'ours_results_1080_resolution_max-identities_{max_identities}.npy', 'wb') as f:
+                with open(f'ours_results_resolution_600_id-range_{start_identities}-{end_identities}_this_rf_range_{this_rf_range}_.npy', 'wb') as f:
                     np.save(f, results)
 
 
@@ -333,13 +362,16 @@ def main(start_n, end_n, max_identities, max_gallery, gallery_folder, full_resol
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--start_n', type=int, default=1)
-    parser.add_argument('--end_n', type=int, default=1000000)
+    parser.add_argument('--end_n', type=int, default=8000000)
+
+    parser.add_argument('--start_identities', type=int, default=1)
+    parser.add_argument('--end_identities', type=int, default=25)
 
     parser.add_argument('--create_gallery', action='store_true')
-    parser.add_argument('--max_identities', type=int, default=25)
+    
     parser.add_argument('--max_gallery', type=int, default=10)
     parser.add_argument('--gallery_folder', type=str, default='/storage/oprabhune/tianen_colab/face_recognition/IMDb/gallery_100')
     args = parser.parse_args()
     
-    img_2  = main(args.start_n, args.end_n, args.max_identities, args.max_gallery, args.gallery_folder, 1080)
+    img_2  = main(args.start_n, args.end_n, args.start_identities, args.end_identities, args.max_gallery, args.gallery_folder, 600)
     
